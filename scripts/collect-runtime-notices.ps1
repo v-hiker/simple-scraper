@@ -73,10 +73,17 @@ function Read-NodeText($Node, [string]$Name) {
     return [string]$child.InnerText
 }
 
+function Get-LegalSha256([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
+    finally { $stream.Dispose(); $algorithm.Dispose() }
+}
+
 function Copy-LegalFile([string]$Source, [string]$Target, [string]$Origin) {
-    $sourceHash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sourceHash = Get-LegalSha256 $Source
     if (Test-Path -LiteralPath $Target) {
-        $targetHash = (Get-FileHash -LiteralPath $Target -Algorithm SHA256).Hash.ToLowerInvariant()
+        $targetHash = Get-LegalSha256 $Target
         if ($sourceHash -ne $targetHash) { throw "A different legal text already exists at $Target" }
     }
     else {

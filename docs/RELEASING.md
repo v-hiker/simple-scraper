@@ -2,16 +2,17 @@
 
 ## 发布前
 
-在 Windows PowerShell 中执行 `./scripts/test.ps1` 与 `./scripts/build.ps1`。打开输出的 SimpleScraper.exe，检查中文界面、主题、设置、扫描、搜索、编辑取消和重命名预览。联网验收需使用你自己的密钥。
+在 Windows PowerShell 中执行 `./scripts/build.ps1`，默认完成测试并生成自包含 EXE 和 ZIP。已有发布文件时脚本拒绝覆盖；使用新的 `-ReleaseDirectory artifacts/releases-next` 或明确指定 `-ReplaceRelease`。构建不会覆盖 `artifacts/app`，也会检查选定输出目录是否有正在运行的应用。
+
+把单文件 EXE 单独放入新目录，以空解包缓存和隔离数据目录冷启动，并使用最终发布文件名验证中文界面、图标、季集展开、编辑取消与设置恢复。ZIP 需要完整解压后验证。联网验收需使用自己的密钥；实际通过范围记录在 [验证记录](VALIDATION.md)。
 
 检查 [来源记录](PROVENANCE.md) 和 [第三方说明](../THIRD-PARTY-NOTICES.md)。发布源码不应包含个人配置、媒体缓存、照片、密钥、旧历史或旧安装器。
 
 ## GitHub
 
-仓库建议名：`simple-scraper`。使用你自己的 GitHub 账号创建空仓库，避免生成另一个 README/许可证提交。然后在新工程目录执行：
+源码仓库为 [v-hiker/simple-scraper](https://github.com/v-hiker/simple-scraper)。完成本地验收后推送源码：
 
 ```powershell
-git remote add origin https://github.com/v-hiker/simple-scraper.git
 git push -u origin main
 ```
 
@@ -19,14 +20,14 @@ git push -u origin main
 
 ## 版本
 
-在 Directory.Build.props 修改 Version 后重新测试。源码推送完成后发布相同版本标签：
+在 Directory.Build.props 修改 Version，添加 `docs/releases/v版本号.md` 的发布说明并重新测试。源码推送、Actions 验证通过后发布相同版本标签，例如：
 
 ```powershell
-git tag v0.1.0
-git push origin v0.1.0
+git tag -a v0.1.1 -m 'SimpleScraper 0.1.1'
+git push origin v0.1.1
 ```
 
-Actions 会在 Windows runner 上重测、构建并创建 Release。需要仓库启用 Actions，以及工作流的 contents 写权限。发布包包含应用、MIT 许可证和第三方说明。版本标签创建/推送应在确认该版本可以公开后执行。
+Actions 会在 Windows runner 上重测、构建、检查内嵌清单、XBF 和第三方许可证，然后上传构建产物。标签发布任务下载同一次构建的产物，核对版本与 SHA-256 后创建 Release。发布包包含应用、MIT 许可证、指南和第三方原始许可文件。
 
 ## 旧数据迁移
 

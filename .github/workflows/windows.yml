@@ -41,16 +41,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          dotnet-version: '10.0.401'
-      - name: Build versioned package
+          name: SimpleScraper-win-x64
+          path: artifacts/releases
+      - name: Verify version and checksums
         shell: pwsh
         run: |
           [xml]$props = [IO.File]::ReadAllText((Join-Path $PWD 'Directory.Build.props'), [Text.Encoding]::UTF8)
           if ($env:GITHUB_REF_NAME -ne ('v' + $props.Project.PropertyGroup.Version)) { throw 'Tag and project version differ.' }
-          ./scripts/restore.ps1
-          ./scripts/build.ps1 -OutputDirectory artifacts -OutputName app-release
+          foreach ($extension in @('exe', 'zip')) {
+            $name = 'SimpleScraper-' + $props.Project.PropertyGroup.Version + '-win-x64.' + $extension
+            $asset = Join-Path $PWD ('artifacts/releases/' + $name)
+            $expected = [IO.File]::ReadAllText(($asset + '.sha256'), [Text.Encoding]::UTF8).Trim()
+            $actual = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $name
+            if ($expected -cne $actual) { throw ('Release checksum mismatch: ' + $name) }
+          }
       - name: Publish GitHub Release
         shell: pwsh
         env:
@@ -58,5 +64,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           $files = @(Get-ChildItem -LiteralPath artifacts/releases -File | ForEach-Object { $_.FullName })
-          gh release create $env:GITHUB_REF_NAME @files --verify-tag --generate-notes
+          $notes = Join-Path $PWD ('docs/releases/' + $env:GITHUB_REF_NAME + '.md')
+          if (!(Test-Path -LiteralPath $notes)) { throw 'Versioned release notes are missing.' }
+          gh release create $env:GITHUB_REF_NAME @files --verify-tag --title ('简单刮削器 ' + $env:GITHUB_REF_NAME) --notes-file $notes
           if ($LASTEXITCODE -ne 0) { throw 'GitHub Release creation failed.' }

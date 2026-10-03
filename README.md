@@ -30,7 +30,9 @@
 
 ## 使用
 
-运行发布包中的 `SimpleScraper.exe`。第一次使用时添加媒体库；默认搜索来源为 TMDB，可在设置里调整来源和输出格式。集数列标题为“集数”，按作品/季显示计数，按单集显示编号；已有列显示偏好会保留。
+下载 EXE 单文件版后直接运行；它包含所需运行库，首次启动会自动解包。也可下载 ZIP 便携版，完整解压后运行其中的 `SimpleScraper.exe`。两种形式的说明见 [发布形式与体积](docs/PACKAGING.md)。
+
+第一次使用时添加媒体库；默认搜索来源为 TMDB，可在设置里调整来源和输出格式。集数列标题为“集数”，按作品/季显示计数，按单集显示编号；已有列显示偏好会保留。
 
 TMDB 需要你自己的 API 密钥。设置里的“获取密钥”打开 [TMDB 官方设置](https://www.themoviedb.org/settings/api)。应用不附带密钥。Bangumi 可用于公开搜索。数据来源的服务条款与限额由各服务提供方规定。
 
@@ -49,7 +51,7 @@ TMDB 需要你自己的 API 密钥。设置里的“获取密钥”打开 [TMDB 
 ./scripts/build.ps1
 ```
 
-默认构建输出为 `artifacts/app-release`，压缩发布包位于 `artifacts/releases`。脚本优先使用相邻 `../.tools/dotnet/dotnet.exe`，否则使用 PATH 中的 SDK。自动化测试只写隔离的临时目录，HTTP 使用模拟响应；实际验证范围见 [验证记录](docs/VALIDATION.md)。
+默认构建输出为 `artifacts/app-release`，EXE、ZIP 与各自 SHA-256 文件位于 `artifacts/releases`。`-PackageMode Portable` 或 `-PackageMode SingleFile` 可单独构建一种形式，默认 `Both`。脚本优先使用相邻 `../.tools/dotnet/dotnet.exe`，否则使用 PATH 中的 SDK。自动化测试只写隔离的临时目录，HTTP 使用模拟响应；实际验证范围见 [验证记录](docs/VALIDATION.md)。
 
 ## 架构与来源
 

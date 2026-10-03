@@ -13,10 +13,17 @@
     <WinUISDKReferences>false</WinUISDKReferences>
     <WindowsPackageType>None</WindowsPackageType>
     <EnableMsixTooling>true</EnableMsixTooling>
+    <!-- MRT uses this fixed name even when browsers rename the downloaded EXE. -->
+    <ProjectPriFileName>resources.pri</ProjectPriFileName>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets/SimpleScraper.ico</ApplicationIcon>
-    <PublishReadyToRun>true</PublishReadyToRun>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <!-- Persisted configuration and metadata use reflection-based JSON contracts. -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <IncludeAllContentForSelfExtract Condition="'$(PublishSingleFile)' == 'true'">true</IncludeAllContentForSelfExtract>
+    <IncludeNativeLibrariesForSelfExtract Condition="'$(PublishSingleFile)' == 'true'">true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile Condition="'$(PublishSingleFile)' == 'true'">true</EnableCompressionInSingleFile>
   </PropertyGroup>
   <ItemGroup>
     <Manifest Include="$(ApplicationManifest)" />
@@ -29,11 +36,53 @@
     <Content Include="../../LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <!-- The SDK's manifest target does not include PublishSingleFile in its incremental
+       inputs. Keep each profile's SxS redirection manifest in a distinct directory. -->
+  <Target Name="SelectSimpleScraperWinRTManifestDirectory" BeforeTargets="GetNewAppManifestValues" Condition="'$(WindowsAppSDKSelfContained)' == 'true'">
+    <PropertyGroup>
+      <SimpleScraperManifestProfile Condition="'$(PublishSingleFile)' == 'true'">SingleFile</SimpleScraperManifestProfile>
+      <SimpleScraperManifestProfile Condition="'$(PublishSingleFile)' != 'true'">Portable</SimpleScraperManifestProfile>
+      <SelfContainedIntermediateOutputPath>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'SimpleScraperManifest', '$(SimpleScraperManifestProfile)'))</SelfContainedIntermediateOutputPath>
+    </PropertyGroup>
+  </Target>
+  <!-- Csc's timestamp check can also reuse an assembly compiled against the other
+       profile's older manifest. Touch the selected manifest once when switching. -->
+  <Target Name="RefreshSimpleScraperWinRTManifestForProfile" BeforeTargets="CoreCompile" DependsOnTargets="CreateWinRTRegistration" Condition="'$(WindowsAppSDKSelfContained)' == 'true'">
+    <ReadLinesFromFile File="$(IntermediateOutputPath)SimpleScraperManifest\last-profile.txt" Condition="Exists('$(IntermediateOutputPath)SimpleScraperManifest\last-profile.txt')">
+      <Output TaskParameter="Lines" ItemName="SimpleScraperPreviousManifestProfile" />
+    </ReadLinesFromFile>
+    <Touch Files="$(ApplicationManifest)" Condition="'@(SimpleScraperPreviousManifestProfile)' != '$(SimpleScraperManifestProfile)'" />
+    <WriteLinesToFile File="$(IntermediateOutputPath)SimpleScraperManifest\last-profile.txt" Lines="$(SimpleScraperManifestProfile)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
   <Target Name="PublishCompiledXaml" AfterTargets="Publish">
     <ItemGroup>
       <CompiledXaml Include="$(TargetDir)**/*.xbf" />
     </ItemGroup>
     <Error Condition="'@(CompiledXaml)' == ''" Text="WinUI compiled XAML is missing from the build output." />
-    <Copy SourceFiles="@(CompiledXaml)" DestinationFiles="@(CompiledXaml->'$(PublishDir)%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <!-- WinUI embeds each XBF into resources.pri; the bundle also carries explicit XBF files. -->
+    <Copy Condition="'$(PublishSingleFile)' != 'true'" SourceFiles="@(CompiledXaml)" DestinationFiles="@(CompiledXaml->'$(PublishDir)%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="PrepareSimpleScraperBundleDocuments" AfterTargets="PrepareForBundle" BeforeTargets="GenerateSingleFileBundle" Condition="'$(PublishSingleFile)' == 'true'">
+    <PropertyGroup>
+      <SimpleScraperBundleDocuments>$(IntermediateOutputPath)SimpleScraperBundleDocuments-$([System.Guid]::NewGuid().ToString('N'))</SimpleScraperBundleDocuments>
+      <SimpleScraperDotnetHost>$([System.IO.Path]::GetFullPath('$(MSBuildToolsPath)\..\..\dotnet.exe'))</SimpleScraperDotnetHost>
+      <SimpleScraperDotnetArgument Condition="Exists('$(SimpleScraperDotnetHost)')">-DotnetPath &quot;$(SimpleScraperDotnetHost)&quot;</SimpleScraperDotnetArgument>
+    </PropertyGroup>
+    <MakeDir Directories="$(SimpleScraperBundleDocuments)" />
+    <Exec Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\..\scripts\collect-runtime-notices.ps1&quot; -ProjectAssetsPath &quot;$(ProjectAssetsFile)&quot; -PublishDirectory &quot;$(SimpleScraperBundleDocuments)&quot; $(SimpleScraperDotnetArgument)" />
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)..\..\docs\USER_GUIDE.md" DestinationFiles="$(SimpleScraperBundleDocuments)\USER_GUIDE.md" />
+    <ItemGroup>
+      <SimpleScraperBundleXamlFiles Include="$(TargetDir)**\*.xbf" />
+      <FilesToBundle Include="@(SimpleScraperBundleXamlFiles)">
+        <RelativePath>%(SimpleScraperBundleXamlFiles.RecursiveDir)%(SimpleScraperBundleXamlFiles.Filename)%(SimpleScraperBundleXamlFiles.Extension)</RelativePath>
+      </FilesToBundle>
+      <SimpleScraperBundleLegalFiles Include="$(SimpleScraperBundleDocuments)\ThirdPartyLicenses\**\*" />
+      <FilesToBundle Include="@(SimpleScraperBundleLegalFiles)">
+        <RelativePath>ThirdPartyLicenses\%(SimpleScraperBundleLegalFiles.RecursiveDir)%(SimpleScraperBundleLegalFiles.Filename)%(SimpleScraperBundleLegalFiles.Extension)</RelativePath>
+      </FilesToBundle>
+      <FilesToBundle Include="$(SimpleScraperBundleDocuments)\USER_GUIDE.md">
+        <RelativePath>USER_GUIDE.md</RelativePath>
+      </FilesToBundle>
+    </ItemGroup>
   </Target>
 </Project>
