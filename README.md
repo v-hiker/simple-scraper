@@ -1,8 +1,22 @@
 # 简单刮削器 · SimpleScraper
 
-![应用图标](src/SimpleScraper.App/Assets/SimpleScraper.png)
+<img src="src/SimpleScraper.App/Assets/SimpleScraper.png" width="64" alt="简单刮削器应用图标">
 
 面向 Windows 的电影、电视剧与动画媒体库管理工具。中文原生界面，先确认匹配，再写入 NFO 和图片；重命名之前提供预览和冲突检查。
+
+[下载 Windows 版本](https://github.com/v-hiker/simple-scraper/releases/latest) · [使用指南](docs/USER_GUIDE.md)
+
+## 界面截图
+
+以下为实际运行的应用窗口，媒体与元数据使用虚构示例。
+
+媒体库列表：默认季数、集数和评分列，支持展开季与集，并查看作品详情。
+
+![媒体库列表与作品详情](docs/images/library.png)
+
+元数据编辑：编辑作品标题、日期、评分、类型和制作信息。
+
+![元数据编辑窗口](docs/images/details.png)
 
 ## 功能
 
