@@ -1,0 +1,14 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/SimpleScraper.App/SimpleScraper.App.csproj" />
+    <Project Path="src/SimpleScraper.Core/SimpleScraper.Core.csproj" />
+    <Project Path="src/SimpleScraper.Infrastructure/SimpleScraper.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SimpleScraper.Performance/SimpleScraper.Performance.csproj" />
+    <Project Path="tests/SimpleScraper.Tests/SimpleScraper.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,62 @@
+name: Windows build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.401'
+      - name: Restore locked dependencies
+        shell: pwsh
+        run: ./scripts/restore.ps1
+      - name: Test and publish
+        shell: pwsh
+        run: ./scripts/build.ps1 -OutputDirectory artifacts -OutputName app-release
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: SimpleScraper-win-x64
+          path: artifacts/releases/*
+          if-no-files-found: error
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.401'
+      - name: Build versioned package
+        shell: pwsh
+        run: |
+          [xml]$props = [IO.File]::ReadAllText((Join-Path $PWD 'Directory.Build.props'), [Text.Encoding]::UTF8)
+          if ($env:GITHUB_REF_NAME -ne ('v' + $props.Project.PropertyGroup.Version)) { throw 'Tag and project version differ.' }
+          ./scripts/restore.ps1
+          ./scripts/build.ps1 -OutputDirectory artifacts -OutputName app-release
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $files = @(Get-ChildItem -LiteralPath artifacts/releases -File | ForEach-Object { $_.FullName })
+          gh release create $env:GITHUB_REF_NAME @files --verify-tag --generate-notes
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub Release creation failed.' }

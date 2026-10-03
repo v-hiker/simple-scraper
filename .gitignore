@@ -1,0 +1,19 @@
+# Outputs, personal settings, credentials, and local data are never source artifacts.
+**/bin/
+**/obj/
+artifacts/
+.vs/
+.idea/
+*.user
+*.suo
+*.lnk
+appsettings.json
+library-state.json
+library-cache/
+actor-cache/
+rename-history.json
+.env
+*.pfx
+*.key
+*.download
+*.tmp
