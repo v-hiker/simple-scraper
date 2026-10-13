@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "simplescraper.core": {
+        "type": "Project"
+      },
+      "simplescraper.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "SimpleScraper.Core": "[0.1.0, )"
+        }
+      }
+    },
+    "net10.0/win-x64": {}
+  }
+}

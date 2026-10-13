@@ -1,0 +1,112 @@
+param(
+    [Parameter(Mandatory = $true)][string]$Installer,
+    [string]$ReportDirectory = 'artifacts/verification/installer'
+)
+$ErrorActionPreference = 'Stop'
+$repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$artifactsRoot = Join-Path $repository 'artifacts'
+$installerPath = [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($Installer)) { $Installer } else { Join-Path $repository $Installer }))
+if (!(Test-Path -LiteralPath $installerPath -PathType Leaf)) { throw 'Installer executable not found.' }
+$reportRoot = [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($ReportDirectory)) { $ReportDirectory } else { Join-Path $repository $ReportDirectory }))
+if (!$reportRoot.StartsWith($artifactsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Installer verification output must stay inside the repository artifacts directory.' }
+$ancestor = $reportRoot
+while ($ancestor.Length -ge $artifactsRoot.Length) {
+    if ((Test-Path -LiteralPath $ancestor) -and (((Get-Item -LiteralPath $ancestor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { throw 'Installer verification cannot traverse a symbolic link or junction.' }
+    if ($ancestor.Equals($artifactsRoot, [StringComparison]::OrdinalIgnoreCase)) { break }
+    $ancestor = Split-Path -Parent $ancestor
+}
+$uninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\SimpleScraper_is1'
+function Read-Installation {
+    foreach ($view in @([Microsoft.Win32.RegistryView]::Registry64, [Microsoft.Win32.RegistryView]::Registry32)) {
+        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser, $view)
+        try {
+            $key = $baseKey.OpenSubKey($uninstallKey)
+            if ($key) {
+                try {
+                    return [pscustomobject]@{
+                        DisplayName = [string]$key.GetValue('DisplayName')
+                        DisplayVersion = [string]$key.GetValue('DisplayVersion')
+                        InstallLocation = [string]$key.GetValue('InstallLocation')
+                        UninstallString = [string]$key.GetValue('UninstallString')
+                    }
+                } finally { $key.Dispose() }
+            }
+        } finally { $baseKey.Dispose() }
+    }
+    return $null
+}
+if (Read-Installation) { throw 'Installer verification requires a clean user profile. An installed SimpleScraper was found.' }
+$appPathKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths\SimpleScraper.exe'
+if (Test-Path -LiteralPath $appPathKey) { throw 'Installer verification requires a clean user profile. A SimpleScraper App Paths registration already exists.' }
+$appName = -join @([char]0x7b80, [char]0x5355, [char]0x522e, [char]0x524a, [char]0x5668)
+$shortcutPath = Join-Path ([Environment]::GetFolderPath('Programs')) ($appName + '.lnk')
+if (Test-Path -LiteralPath $shortcutPath) { throw 'Installer verification requires a clean Start Menu. A SimpleScraper shortcut already exists.' }
+$properties = [xml][IO.File]::ReadAllText((Join-Path $repository 'Directory.Build.props'))
+$version = [string]$properties.Project.PropertyGroup.Version
+$runRoot = Join-Path $reportRoot ([Guid]::NewGuid().ToString('N'))
+$installRoot = Join-Path $runRoot 'app'
+[IO.Directory]::CreateDirectory($runRoot) | Out-Null
+$dataRoot = Join-Path $env:LOCALAPPDATA 'SimpleScraper'
+[IO.Directory]::CreateDirectory($dataRoot) | Out-Null
+$sentinelPath = Join-Path $dataRoot ('installer-verification-' + [Guid]::NewGuid().ToString('N') + '.txt')
+$sentinel = [Guid]::NewGuid().ToString('N')
+[IO.File]::WriteAllText($sentinelPath, $sentinel, [Text.UTF8Encoding]::new($false))
+function Assert-DataPreserved {
+    if (!(Test-Path -LiteralPath $sentinelPath) -or [IO.File]::ReadAllText($sentinelPath) -ne $sentinel) { throw 'Installer verification user data was changed.' }
+}
+function Invoke-InstallerProcess([string]$Executable, [string[]]$Arguments) {
+    $process = Start-Process -FilePath $Executable -ArgumentList $Arguments -WindowStyle Hidden -PassThru
+    if (!$process.WaitForExit(60000)) { throw 'Installer verification process is still running after 60 seconds.' }
+    if ($process.ExitCode -ne 0) { throw ('Installer verification process failed with exit code ' + $process.ExitCode) }
+}
+$uninstaller = Join-Path $installRoot 'unins000.exe'
+$commonArguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/NOLAUNCH', '/NOCLOSEAPPLICATIONS', '/NORESTARTAPPLICATIONS')
+$verified = $false
+try {
+    foreach ($phase in @('install', 'reinstall')) {
+        $arguments = $commonArguments + @('/LANG=english', ('/DIR="' + $installRoot + '"'), ('/LOG="' + (Join-Path $runRoot ($phase + '.log')) + '"'))
+        Invoke-InstallerProcess $installerPath $arguments
+        $registration = Read-Installation
+        if (!$registration) { throw 'Windows installed-app registration is missing.' }
+        if ($registration.DisplayName -ne $appName -or $registration.DisplayVersion -ne $version) { throw 'Installed-app name or version is incorrect.' }
+        if ([IO.Path]::GetFullPath($registration.InstallLocation).TrimEnd('\') -ne $installRoot.TrimEnd('\')) { throw 'Installed-app registration points to another directory.' }
+        if (!(Test-Path -LiteralPath (Join-Path $installRoot 'SimpleScraper.exe'))) { throw 'Installed application is missing.' }
+        if (!(Test-Path -LiteralPath $uninstaller)) { throw 'Installed application uninstaller is missing.' }
+        if (!(Test-Path -LiteralPath $shortcutPath)) { throw 'Start Menu shortcut is missing.' }
+        $appPath = Get-ItemProperty -LiteralPath $appPathKey
+        if ($appPath.'(default)' -ne (Join-Path $installRoot 'SimpleScraper.exe')) { throw 'Windows App Paths registration is incorrect.' }
+        $shell = New-Object -ComObject WScript.Shell
+        try {
+            $shortcut = $shell.CreateShortcut($shortcutPath)
+            if ($shortcut.TargetPath -ne (Join-Path $installRoot 'SimpleScraper.exe') -or $shortcut.WorkingDirectory -ne $installRoot) { throw 'Start Menu shortcut target is incorrect.' }
+        } finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
+        Assert-DataPreserved
+    }
+    Invoke-InstallerProcess $uninstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="' + (Join-Path $runRoot 'uninstall.log') + '"'))
+    if (Read-Installation) { throw 'Installed-app registration remains after uninstall.' }
+    if (Test-Path -LiteralPath $shortcutPath) { throw 'Start Menu shortcut remains after uninstall.' }
+    if (Test-Path -LiteralPath $appPathKey) { throw 'Windows App Paths registration remains after uninstall.' }
+    if (Test-Path -LiteralPath (Join-Path $installRoot 'SimpleScraper.exe')) { throw 'Application executable remains after uninstall.' }
+    Assert-DataPreserved
+    $verified = $true
+    $report = [ordered]@{
+        version = $version
+        installer = $installerPath
+        installDirectory = $installRoot
+        installRegistered = $true
+        startMenuShortcutVerified = $true
+        reinstallPreservedData = $true
+        uninstallRemovedRegistration = $true
+        uninstallPreservedData = $true
+    }
+    [IO.File]::WriteAllText((Join-Path $runRoot 'result.json'), (($report | ConvertTo-Json) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+    Write-Output ('Installer verification passed: ' + (Join-Path $runRoot 'result.json'))
+} finally {
+    if (!$verified -and (Test-Path -LiteralPath $uninstaller)) {
+        $registration = Read-Installation
+        if ($registration -and [IO.Path]::GetFullPath($registration.InstallLocation).TrimEnd('\') -eq $installRoot.TrimEnd('\')) {
+            Invoke-InstallerProcess $uninstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+        }
+    }
+    if (Test-Path -LiteralPath $sentinelPath) { [IO.File]::Delete($sentinelPath) }
+}
