@@ -32,6 +32,7 @@ public sealed partial class LibraryPage
         var ready = _stateReady && !_initializing;
         foreach (var action in _selectionActions) action.IsEnabled = ready && !_busy && !_scanning && !_loadingLibrary && Current != null;
         foreach (var action in _writeActions) action.IsEnabled = ready && !_busy && !_scanning && !_loadingLibrary;
+        foreach (var row in _libraryRows) row.SetActionsEnabled(CanManageLibraries);
         _libraries.IsEnabled = ready && !_busy; _filter.IsEnabled = _filterState.IsEnabled = ready && !_loadingLibrary;
         _spinner.IsActive = _working || _scanning || _loadingLibrary || _rendering || _initializing; _spinner.Visibility = _spinner.IsActive ? Visibility.Visible : Visibility.Collapsed; _progress.IsIndeterminate = _working || _initializing || _loadingLibrary; _progress.Visibility = _working || _scanning || _initializing || _loadingLibrary ? Visibility.Visible : Visibility.Collapsed; _cancel.Visibility = _scanning ? Visibility.Visible : Visibility.Collapsed;
         if (_episodeEdit != null) _episodeEdit.IsEnabled = ready && !_busy && !_scanning && !_loadingLibrary && Selected != null && (Selected.File != null || Selected.Season == null || Selected.Season >= 0);

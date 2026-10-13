@@ -118,35 +118,42 @@ public sealed partial class LibraryPage
         _store.Libraries = _store.Libraries.Append(entry).ToList(); await Save(); _libraries.ItemsSource = _store.Libraries; _libraries.SelectedItem = entry;
     }
 
-    private async Task ConfigureLibrary()
+    private async Task ConfigureLibrary(MediaLibrary library)
     {
-        if (_libraries.SelectedItem is not MediaLibrary library) return;
+        if (!_store.Libraries.Contains(library)) return;
         var name = new TextBox { Header = L.Text("Library name"), Text = library.Name }; Id(name, "LibraryName");
-        var profile = new ComboBox { ItemsSource = new[] { "Jellyfin", "Emby" }, SelectedIndex = OutputProfile == MediaOutputProfile.Emby ? 1 : 0 }; Id(profile, "LibraryOutputProfile");
+        var profile = new ComboBox { ItemsSource = new[] { "Jellyfin", "Emby" }, SelectedIndex = MediaOutputProfile.ForLibrary(library, _store.Profile) == MediaOutputProfile.Emby ? 1 : 0 }; Id(profile, "LibraryOutputProfile");
         var rules = Text(""); void Describe() => rules.Text = (profile.SelectedIndex == 1 ? MediaOutputProfile.Emby : MediaOutputProfile.Jellyfin).Describe(); Describe(); profile.SelectionChanged += (_, _) => Describe();
         var panel = new StackPanel { Spacing = 12, Width = 530 }; panel.Children.Add(Text(library.Path)); panel.Children.Add(Text(library.KindLabel)); panel.Children.Add(name); panel.Children.Add(InlineField("Media tool", profile)); panel.Children.Add(rules); panel.Children.Add(Text("Scraping and renaming use this library's media tool. Changing this setting does not modify existing files."));
-        var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = L.Text("Library settings"), Content = panel, PrimaryButtonText = L.Text("Apply"), SecondaryButtonText = L.Text("Remove library"), SecondaryButtonStyle = Ui.Style("DangerButtonStyle"), CloseButtonText = L.Text("Cancel"), DefaultButton = ContentDialogButton.Primary };
+        var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = L.Text("Library settings"), Content = panel, PrimaryButtonText = L.Text("Apply"), CloseButtonText = L.Text("Cancel"), DefaultButton = ContentDialogButton.Primary }; Id(dialog, "LibrarySettingsDialog");
         dialog.Resources["ContentDialogMaxWidth"] = 620d;
         var result = await Ui.Show(dialog);
-        if (result == ContentDialogResult.Secondary) { await ConfirmRemoveLibrary(library); return; }
         if (result != ContentDialogResult.Primary) return;
+        var selected = _libraries.SelectedItem as MediaLibrary;
         var updated = library with { Name = string.IsNullOrWhiteSpace(name.Text) ? library.Name : name.Text.Trim(), OutputProfile = profile.SelectedIndex == 1 ? "Emby" : "Jellyfin" };
         _store.Libraries = _store.Libraries.Select(l => l == library ? updated : l).ToList(); await Save();
         _initializing = true;
-        try { _libraries.ItemsSource = _store.Libraries; _libraries.SelectedItem = updated; }
+        try { _libraries.ItemsSource = _store.Libraries; _libraries.SelectedItem = selected == library ? updated : selected; }
         finally { _initializing = false; }
     }
 
     private async Task ConfirmRemoveLibrary(MediaLibrary library)
     {
+        if (!_store.Libraries.Contains(library)) return;
         var content = new StackPanel { Spacing = 12, Width = 530 }; content.Children.Add(Text(library.Name, 18)); content.Children.Add(Text(library.Path)); content.Children.Add(Text("Remove this library and its scan cache from the app? Media files, NFO files and pictures in this folder will not be deleted."));
         var confirm = new ContentDialog { XamlRoot = XamlRoot, Title = L.Text("Remove library"), Content = content, PrimaryButtonText = L.Text("Remove library"), PrimaryButtonStyle = Ui.Style("DangerButtonStyle"), CloseButtonText = L.Text("Cancel"), DefaultButton = ContentDialogButton.Close }; Id(confirm, "LibraryRemoveConfirmation"); confirm.Resources["ContentDialogMaxWidth"] = 620d;
-        if (await Ui.Show(confirm) != ContentDialogResult.Primary) return;
-        _scanCancellation?.Cancel(); _scanCancellation = null; _scanning = _loadingLibrary = false; _scanVersion++; _snapshots.Remove(LibrarySnapshotStore.Key(library)); await Task.Run(() => _snapshotStore.Remove(library)); _store.Libraries = _store.Libraries.Where(l => l != library).ToList(); _activeLibraryKey = null; _store.LastLibraryKey = ""; await Save();
+        var selected = _libraries.SelectedItem as MediaLibrary;
+        var removal = LibraryReview.RemoveLibrary(_store.Libraries, library, selected, await Ui.Show(confirm) == ContentDialogResult.Primary);
+        if (!removal.Removed) return;
+        var selectedRemoved = selected == library;
+        _snapshots.Remove(LibrarySnapshotStore.Key(library)); await Task.Run(() => _snapshotStore.Remove(library));
+        _store.Libraries = removal.Libraries;
+        if (selectedRemoved) { _scanCancellation?.Cancel(); _scanCancellation = null; _scanning = _loadingLibrary = false; _scanVersion++; _activeLibraryKey = null; _store.LastLibraryKey = removal.SelectedLibrary is null ? "" : LibrarySnapshotStore.Key(removal.SelectedLibrary); }
+        await Save();
         _initializing = true;
-        try { _libraries.ItemsSource = _store.Libraries; _libraries.SelectedIndex = _store.Libraries.Count > 0 ? 0 : -1; }
+        try { _libraries.ItemsSource = _store.Libraries; _libraries.SelectedItem = removal.SelectedLibrary; }
         finally { _initializing = false; }
-        _media.Clear(); await ShowRows(); if (_store.Libraries.Count > 0) await LoadLibrary();
+        if (selectedRemoved) { _media.Clear(); await ShowRows(); if (removal.SelectedLibrary != null) await LoadLibrary(); }
     }
 
     private async Task ConfigureColumns()

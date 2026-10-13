@@ -25,7 +25,18 @@ public static class LibraryReview
     public static bool DuplicateLibrary(IEnumerable<MediaLibrary> libraries, MediaLibrary candidate) => libraries.Any(l => LibrarySnapshotStore.Key(l) == LibrarySnapshotStore.Key(candidate) ||
         (candidate.AutoLayout || l.AutoLayout) && l.Kind == candidate.Kind &&
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(l.Path)).Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(candidate.Path)), StringComparison.OrdinalIgnoreCase));
+
+    public static LibraryRemoval RemoveLibrary(IReadOnlyList<MediaLibrary> libraries, MediaLibrary target, MediaLibrary? selected, bool confirmed)
+    {
+        var original = libraries.ToList(); var index = original.IndexOf(target);
+        if (!confirmed || index < 0) return new(original, selected, false);
+        var remaining = original.Where(library => library != target).ToList();
+        var next = selected != target ? selected : remaining.Count == 0 ? null : remaining[Math.Min(index, remaining.Count - 1)];
+        return new(remaining, next, true);
+    }
 }
+
+public sealed record LibraryRemoval(List<MediaLibrary> Libraries, MediaLibrary? SelectedLibrary, bool Removed);
 
 public static class RenameReview
 {

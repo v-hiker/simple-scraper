@@ -16,11 +16,7 @@
                 <ItemsStackPanel Orientation="Vertical" CacheLength="2" />
             </ItemsPanelTemplate>
             <DataTemplate x:Key="LibraryRootTemplate">
-                <StackPanel Spacing="4">
-                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Text="{Binding KindLabel}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Text="{Binding Path}" FontSize="11" TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                </StackPanel>
+                <views:LibraryNavigationRow Library="{Binding}" />
             </DataTemplate>
             <DataTemplate x:Key="ColumnPreferenceTemplate">
                 <views:ColumnPreferencePresenter Preference="{Binding}" />

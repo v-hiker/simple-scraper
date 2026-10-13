@@ -3,6 +3,12 @@ param(
     [string]$ReportDirectory = 'artifacts/verification/installer'
 )
 $ErrorActionPreference = 'Stop'
+function Test-SameWindowsPath([string]$Actual, [string]$Expected) {
+    if ([string]::IsNullOrWhiteSpace($Actual) -or [string]::IsNullOrWhiteSpace($Expected)) { return $false }
+    $actualPath = [IO.Path]::GetFullPath($Actual).TrimEnd([char[]]@('\', '/'))
+    $expectedPath = [IO.Path]::GetFullPath($Expected).TrimEnd([char[]]@('\', '/'))
+    return $actualPath.Equals($expectedPath, [StringComparison]::OrdinalIgnoreCase)
+}
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $artifactsRoot = Join-Path $repository 'artifacts'
 $installerPath = [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($Installer)) { $Installer } else { Join-Path $repository $Installer }))
@@ -69,16 +75,32 @@ try {
         $registration = Read-Installation
         if (!$registration) { throw 'Windows installed-app registration is missing.' }
         if ($registration.DisplayName -ne $appName -or $registration.DisplayVersion -ne $version) { throw 'Installed-app name or version is incorrect.' }
-        if ([IO.Path]::GetFullPath($registration.InstallLocation).TrimEnd('\') -ne $installRoot.TrimEnd('\')) { throw 'Installed-app registration points to another directory.' }
+        if (!(Test-SameWindowsPath $registration.InstallLocation $installRoot)) { throw 'Installed-app registration points to another directory.' }
         if (!(Test-Path -LiteralPath (Join-Path $installRoot 'SimpleScraper.exe'))) { throw 'Installed application is missing.' }
         if (!(Test-Path -LiteralPath $uninstaller)) { throw 'Installed application uninstaller is missing.' }
         if (!(Test-Path -LiteralPath $shortcutPath)) { throw 'Start Menu shortcut is missing.' }
         $appPath = Get-ItemProperty -LiteralPath $appPathKey
-        if ($appPath.'(default)' -ne (Join-Path $installRoot 'SimpleScraper.exe')) { throw 'Windows App Paths registration is incorrect.' }
+        if (!(Test-SameWindowsPath $appPath.'(default)' (Join-Path $installRoot 'SimpleScraper.exe'))) { throw 'Windows App Paths registration is incorrect.' }
         $shell = New-Object -ComObject WScript.Shell
         try {
             $shortcut = $shell.CreateShortcut($shortcutPath)
-            if ($shortcut.TargetPath -ne (Join-Path $installRoot 'SimpleScraper.exe') -or $shortcut.WorkingDirectory -ne $installRoot) { throw 'Start Menu shortcut target is incorrect.' }
+            $expectedTarget = Join-Path $installRoot 'SimpleScraper.exe'
+            $shortcutReport = [ordered]@{
+                phase = $phase
+                shortcutPath = $shortcutPath
+                actualTarget = $shortcut.TargetPath
+                actualWorkingDirectory = $shortcut.WorkingDirectory
+                expectedTarget = $expectedTarget
+                expectedWorkingDirectory = $installRoot
+                targetMatches = Test-SameWindowsPath $shortcut.TargetPath $expectedTarget
+                workingDirectoryMatches = Test-SameWindowsPath $shortcut.WorkingDirectory $installRoot
+            }
+            $shortcutReportPath = Join-Path $runRoot ($phase + '-shortcut.json')
+            [IO.File]::WriteAllText($shortcutReportPath, (($shortcutReport | ConvertTo-Json) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+            if (!$shortcutReport.targetMatches -or !$shortcutReport.workingDirectoryMatches) {
+                Write-Output ($shortcutReport | ConvertTo-Json -Compress)
+                throw ('Start Menu shortcut target or working directory is incorrect. Details: ' + $shortcutReportPath)
+            }
         } finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
         Assert-DataPreserved
     }
@@ -104,7 +126,7 @@ try {
 } finally {
     if (!$verified -and (Test-Path -LiteralPath $uninstaller)) {
         $registration = Read-Installation
-        if ($registration -and [IO.Path]::GetFullPath($registration.InstallLocation).TrimEnd('\') -eq $installRoot.TrimEnd('\')) {
+        if ($registration -and (Test-SameWindowsPath $registration.InstallLocation $installRoot)) {
             Invoke-InstallerProcess $uninstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
         }
     }
