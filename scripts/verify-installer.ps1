@@ -52,6 +52,11 @@ $version = [string]$properties.Project.PropertyGroup.Version
 $runRoot = Join-Path $reportRoot ([Guid]::NewGuid().ToString('N'))
 $installRoot = Join-Path $runRoot 'app'
 [IO.Directory]::CreateDirectory($runRoot) | Out-Null
+$windowsPowerShell = Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe'
+$shortcutReader = Join-Path $PSScriptRoot 'read-shortcut.ps1'
+if (!(Test-Path -LiteralPath $windowsPowerShell -PathType Leaf) -or !(Test-Path -LiteralPath $shortcutReader -PathType Leaf)) { throw 'Windows PowerShell STA shortcut reader is missing.' }
+$hostReport = [ordered]@{powerShellVersion = $PSVersionTable.PSVersion.ToString(); powerShellEdition = [string]$PSVersionTable.PSEdition; apartmentState = [Threading.Thread]::CurrentThread.GetApartmentState().ToString()}
+[IO.File]::WriteAllText((Join-Path $runRoot 'verification-host.json'), (($hostReport | ConvertTo-Json) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
 $dataRoot = Join-Path $env:LOCALAPPDATA 'SimpleScraper'
 [IO.Directory]::CreateDirectory($dataRoot) | Out-Null
 $sentinelPath = Join-Path $dataRoot ('installer-verification-' + [Guid]::NewGuid().ToString('N') + '.txt')
@@ -81,27 +86,35 @@ try {
         if (!(Test-Path -LiteralPath $shortcutPath)) { throw 'Start Menu shortcut is missing.' }
         $appPath = Get-ItemProperty -LiteralPath $appPathKey
         if (!(Test-SameWindowsPath $appPath.'(default)' (Join-Path $installRoot 'SimpleScraper.exe'))) { throw 'Windows App Paths registration is incorrect.' }
-        $shell = New-Object -ComObject WScript.Shell
-        try {
-            $shortcut = $shell.CreateShortcut($shortcutPath)
-            $expectedTarget = Join-Path $installRoot 'SimpleScraper.exe'
-            $shortcutReport = [ordered]@{
-                phase = $phase
-                shortcutPath = $shortcutPath
-                actualTarget = $shortcut.TargetPath
-                actualWorkingDirectory = $shortcut.WorkingDirectory
-                expectedTarget = $expectedTarget
-                expectedWorkingDirectory = $installRoot
-                targetMatches = Test-SameWindowsPath $shortcut.TargetPath $expectedTarget
-                workingDirectoryMatches = Test-SameWindowsPath $shortcut.WorkingDirectory $installRoot
-            }
-            $shortcutReportPath = Join-Path $runRoot ($phase + '-shortcut.json')
-            [IO.File]::WriteAllText($shortcutReportPath, (($shortcutReport | ConvertTo-Json) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
-            if (!$shortcutReport.targetMatches -or !$shortcutReport.workingDirectoryMatches) {
-                Write-Output ($shortcutReport | ConvertTo-Json -Compress)
-                throw ('Start Menu shortcut target or working directory is incorrect. Details: ' + $shortcutReportPath)
-            }
-        } finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
+        $shortcutCopy = Join-Path $runRoot ($phase + '-shortcut.lnk')
+        [IO.File]::Copy($shortcutPath, $shortcutCopy, $true)
+        $readerOutput = & $windowsPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -File $shortcutReader -LiteralPath $shortcutCopy
+        if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell STA shortcut inspection failed.' }
+        $shortcut = ($readerOutput -join [Environment]::NewLine) | ConvertFrom-Json
+        $expectedTarget = Join-Path $installRoot 'SimpleScraper.exe'
+        $shortcutReport = [ordered]@{
+            phase = $phase
+            shortcutPath = $shortcutPath
+            copiedShortcutPath = $shortcutCopy
+            shortcutBytes = $shortcut.shortcutBytes
+            shortcutSha256 = $shortcut.shortcutSha256
+            readerPowerShellVersion = $shortcut.powerShellVersion
+            readerPowerShellEdition = $shortcut.powerShellEdition
+            readerApartmentState = $shortcut.apartmentState
+            reader = $shortcut.reader
+            actualTarget = $shortcut.targetPath
+            actualWorkingDirectory = $shortcut.workingDirectory
+            expectedTarget = $expectedTarget
+            expectedWorkingDirectory = $installRoot
+            targetMatches = Test-SameWindowsPath $shortcut.targetPath $expectedTarget
+            workingDirectoryMatches = Test-SameWindowsPath $shortcut.workingDirectory $installRoot
+        }
+        $shortcutReportPath = Join-Path $runRoot ($phase + '-shortcut.json')
+        [IO.File]::WriteAllText($shortcutReportPath, (($shortcutReport | ConvertTo-Json) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+        if (!$shortcutReport.targetMatches -or !$shortcutReport.workingDirectoryMatches) {
+            Write-Output ($shortcutReport | ConvertTo-Json -Compress)
+            throw ('Start Menu shortcut target or working directory is incorrect. Details: ' + $shortcutReportPath)
+        }
         Assert-DataPreserved
     }
     Invoke-InstallerProcess $uninstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="' + (Join-Path $runRoot 'uninstall.log') + '"'))
